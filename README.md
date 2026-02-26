@@ -34,6 +34,7 @@ Nucleic Acids Research (1997) 25(17):3389–3402.
 https://doi.org/10.1093/nar/25.17.3389
 
 ## MMseqs2
+Github: https://github.com/soedinglab/MMseqs2
 
 Steinegger M, Söding J.
 MMseqs2 enables sensitive protein sequence searching for the analysis of massive data sets.
