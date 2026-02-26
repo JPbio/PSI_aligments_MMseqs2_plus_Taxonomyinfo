@@ -153,16 +153,16 @@ After preparing your MMseqs target database (see Database Preparation section), 
 
     chmod +x mmseqs_sting_taxonomy.sh
 
-    ./mmseqs_sting_taxonomy.sh \
-      -p sting_MM \
-      -q sting.faa \
+    ./mmseqs2_with_taxonlineages.sh 
+      -p sting_5i \
+      -q sting.fasta \
       -T MM_refseq_protein \
       -t 60 \
-      -n 3 \
+      -n 5 \
       -e 1e-5 \
-      -m TaxonomyDB/prot.accession2taxid.gz \
-      -d TaxonomyDB/ \
-      -o results_sting
+      -m /thirdisk/public_databases/TaxonomyDB/prot.accession2taxid \
+      -d /thirdisk/public_databases/TaxonomyDB/\
+
 ## Parameter Explanation
 
 Parameter	Description
