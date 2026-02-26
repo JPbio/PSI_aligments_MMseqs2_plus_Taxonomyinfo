@@ -175,6 +175,85 @@ echo "[INFO] Keep tmp:             $KEEP_TMP"
 echo "[INFO] Keep tax intermediates:$KEEP_TAX"
 echo
 
+
+###############################################################################
+# PRE-FLIGHT VALIDATION CHECKS
+###############################################################################
+
+echo "------------------------------------------------------------"
+echo "[CHECKPOINT] Validating inputs and environment..."
+echo "------------------------------------------------------------"
+
+# 1) Check required executables
+for tool in mmseqs taxonkit awk sort join cut; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "[ERROR] Required executable '$tool' not found in PATH."
+        exit 1
+    fi
+done
+echo "[OK] Required executables found."
+
+# 2) Check query FASTA
+if [[ ! -f "$QUERY_FASTA" ]]; then
+    echo "[ERROR] Query FASTA file not found: $QUERY_FASTA"
+    exit 1
+fi
+
+if [[ ! -s "$QUERY_FASTA" ]]; then
+    echo "[ERROR] Query FASTA file is empty: $QUERY_FASTA"
+    exit 1
+fi
+echo "[OK] Query FASTA exists and is non-empty."
+
+# 3) Check target MMseqs DB
+if [[ ! -f "${TARGET_DB}.dbtype" ]]; then
+    echo "[ERROR] Target MMseqs DB not found or not formatted: $TARGET_DB"
+    echo "        Expected file: ${TARGET_DB}.dbtype"
+    exit 1
+fi
+echo "[OK] Target MMseqs DB detected."
+
+# 4) Check mapping file
+if [[ ! -f "$MAPFILE" ]]; then
+    echo "[ERROR] Mapping file not found: $MAPFILE"
+    exit 1
+fi
+echo "[OK] Mapping file exists."
+
+# 5) Check taxdump directory structure
+if [[ ! -f "$TAXDUMP/nodes.dmp" ]] || [[ ! -f "$TAXDUMP/names.dmp" ]]; then
+    echo "[ERROR] Taxdump directory invalid: $TAXDUMP"
+    echo "        Required files: nodes.dmp and names.dmp"
+    exit 1
+fi
+echo "[OK] Taxdump directory validated."
+
+# 6) Validate numeric parameters
+if ! [[ "$THREADS" =~ ^[0-9]+$ ]]; then
+    echo "[ERROR] THREADS must be an integer."
+    exit 1
+fi
+
+if ! [[ "$NUM_ITER" =~ ^[0-9]+$ ]]; then
+    echo "[ERROR] NUM_ITERATIONS must be an integer."
+    exit 1
+fi
+
+echo "[OK] Numeric parameters validated."
+
+echo "------------------------------------------------------------"
+echo "[CHECKPOINT PASSED] All inputs validated."
+echo "Starting MMseqs pipeline..."
+echo "------------------------------------------------------------"
+echo
+
+head -n 1 "$MAPFILE" >/dev/null 2>&1 || {
+    echo "[ERROR] Mapping file appears unreadable."
+    exit 1
+}
+
+
+
 ###############################################################################
 # 1) Prepare query database
 ###############################################################################
