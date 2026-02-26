@@ -50,11 +50,11 @@ Before running the pipeline, the target protein database must be formatted as an
 
 1. Prepare Protein FASTA Database
 
-The reference protein database must be in FASTA format.
+  The reference protein database must be in FASTA format.
 
-Example (RefSeq protein):
+  Example (RefSeq protein):
 
-refseq_protein.faa
+    refseq_protein.faa
 
 2. Create MMseqs Database
 
@@ -78,15 +78,15 @@ For large databases (RefSeq-scale) and repeated searches, building a prefilter i
       --threads 60 \
       --check-compatible 1 \
       -s 7.5
-Important Considerations
+### Important Considerations
 
-Indexing a RefSeq-scale database can require very large disk space.
+  Indexing a RefSeq-scale database can require very large disk space.
 
-In our tests, index creation consumed >1 TB of temporary disk space.
+  In our tests, index creation consumed >1 TB of temporary disk space.
 
-Disk usage scales with database size and sensitivity parameter (-s).
+  Disk usage scales with database size and sensitivity parameter (-s).
 
-Attempting to control temporary files:
+  Attempting to control temporary files:
 
     mkdir -p mmseqs_tmp
 
@@ -96,62 +96,53 @@ Attempting to control temporary files:
       --check-compatible 1 \
       -s 7.5
 
-However:
+  However:
 
     --remove-tmp-files 1 does not reduce peak disk usage during index construction.
-It only removes temporary files after completion.
 
-Practical Implication
+  It only removes temporary files after completion.
 
-For small gene sets (e.g., a few query genes), building a full RefSeq index may be:
+  Practical Implication
 
-Disk-expensive (>1 TB)
+  -For small gene sets (e.g., a few query genes), building a full RefSeq index may be:
 
-Potentially unnecessary
+  - Disk-expensive (>1 TB)
+
+  - Potentially unnecessary
 
 In such cases, direct searches without index precomputation may be more practical.
 
-Taxonomic Annotation Requirements
+### Taxonomic Annotation Requirements
 
 The script requires:
 
-NCBI protein accession → TaxID mapping file
-(e.g., prot.accession2taxid or .gz)
+  - NCBI protein accession → TaxID mapping file
+  (e.g., prot.accession2taxid or .gz)
 
-NCBI taxonomy dump directory for taxonkit
-(containing nodes.dmp, names.dmp, etc.)
+  - NCBI taxonomy dump directory for taxonkit
+  (containing nodes.dmp, names.dmp, etc.)
 
 These are used to:
 
-Map MMseqs hits to TaxIDs
+  Map MMseqs hits to TaxIDs
+  Retrieve full lineage using taxonkit
+  Summary of Pipeline
+  Create MMseqs query database
+  Perform iterative MMseqs search (PSI-BLAST equivalent strategy)
+  Export alignment results  
+  Map protein accessions to TaxIDs
+  Retrieve taxonomic lineage
+  Append taxonomy columns to final result table
 
-Retrieve full lineage using taxonkit
+### Final output:
 
-Summary of Pipeline
-
-Create MMseqs query database
-
-Perform iterative MMseqs search (PSI-BLAST equivalent strategy)
-
-Export alignment results
-
-Map protein accessions to TaxIDs
-
-Retrieve taxonomic lineage
-
-Append taxonomy columns to final result table
-
-Final output:
-
-PREFIX_Res.with_taxonomy.tsv
+    PREFIX_Res.with_taxonomy.tsv
 
 Containing:
 
-Original MMseqs alignment metrics
-
-TaxID
-
-Full taxonomic lineage
+  - Original MMseqs alignment metrics
+  - TaxID
+  - Full taxonomic lineage
 
 ## Running the Pipeline
 
@@ -202,32 +193,23 @@ The pipeline produces:
 
 Raw MMseqs alignment output including:
 
-Query accession
-
-Target accession
-
-Alignment coordinates
-
-Coverage
-
-Percent identity
-
-E-value
-
-Bit score
-
-sting_MM_Res.with_taxonomy.tsv
-
-Same table as above, with two additional columns appended:
-
-taxid
-
-lineage
+    Query accession
+    Target accession
+    Alignment coordinates
+    Coverage
+    Percent identity
+    E-value
+    Bit score
+    sting_MM_Res.with_taxonomy.tsv
+    Same table as above, with two additional columns appended:
+    taxid
+    lineage
 
 The lineage column contains the full NCBI taxonomy path, e.g.:
 
-cellular organisms;Eukaryota;Metazoa;Arthropoda;Insecta;Diptera;Drosophilidae;Drosophila;Drosophila melanogaster
-Minimal Example (Small Test Run)
+    cellular organisms;Eukaryota;Metazoa;Arthropoda;Insecta;Diptera;Drosophilidae;Drosophila;Drosophila melanogaster
+
+### Minimal Example (Small Test Run)
 
 For testing with a small query file and reduced resources:
 
@@ -244,32 +226,25 @@ For testing with a small query file and reduced resources:
 
 This is recommended to validate:
 
-Database formatting
+  - Database formatting
+  - Mapping file compatibility
+  - Taxonomy directory correctness
+  = Available disk space
 
-Mapping file compatibility
-
-Taxonomy directory correctness
-
-Available disk space
-
-Recommended Strategy
+### Recommended Strategy
 
 For exploratory distant homology searches:
 
 Start with:
 
--n 3
-
--s 7.5
-
--e 1e-5
+    -n 3
+    -s 7.5
+    -e 1e-5
 
 Increase sensitivity (-s) or iterations (-n) for deeper searches.
 
 For very large databases:
 
-Ensure sufficient disk space.
-
-Consider whether building a full MMseqs index is justified.
-
-Monitor temporary directory size.
+  - Ensure sufficient disk space.
+  - Consider whether building a full MMseqs index is justified.
+  - Monitor temporary directory size.
