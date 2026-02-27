@@ -13,10 +13,20 @@ set -euo pipefail
 #   - taxonkit
 #   - awk, cut, sort, join, mkdir, rm, etc.
 #
+# Logging:
+#   - A combined log is written to: OUTDIR/PREFIX.run.log
+#   - A summary report is written to: OUTDIR/PREFIX.summary.txt
+#
 # Defaults:
 #   - Intermediate taxonomy files are REMOVED by default.
-#   - Use --keep-tax to keep intermediate taxonomy files.
-#   - Use --keep-tmp to keep MMseqs tmp directory.
+#   - MMseqs query/result DB artifacts are REMOVED by default.
+#   - The intermediate MMseqs TSV (PREFIX_Res.tsv) is REMOVED by default.
+#
+# Flags:
+#   - --keep-tax        keep intermediate taxonomy files
+#   - --keep-mmseqs-db  keep MMseqs query/result DB artifacts
+#   - --keep-raw        keep raw MMseqs TSV (PREFIX_Res.tsv)
+#   - --keep-tmp        keep MMseqs tmp directory
 ###############################################################################
 
 usage() {
@@ -35,7 +45,9 @@ Usage:
     [-M MAX_SEQS] \
     [-o OUTDIR] \
     [--keep-tmp] \
-    [--keep-tax]
+    [--keep-tax] \
+    [--keep-mmseqs-db] \
+    [--keep-raw]
 
 Required arguments:
   -p  PREFIX                  Prefix for naming outputs (e.g. sting_MM)
@@ -53,12 +65,20 @@ Optional arguments:
   -s  SENSITIVITY             mmseqs -s sensitivity (default: 7.5)
   -M  MAX_SEQS                mmseqs --max-seqs (default: 2000)
   -o  OUTDIR                  Output directory (default: .)
+
+Optional flags:
   --keep-tmp                  Do not delete MMseqs temporary directory
   --keep-tax                  Keep intermediate taxonomy files (default: delete)
+  --keep-mmseqs-db            Keep MMseqs query/result DB artifacts (default: delete)
+  --keep-raw                  Keep raw MMseqs TSV (PREFIX_Res.tsv) (default: delete)
 
 Outputs (in OUTDIR):
-  PREFIX_Res.tsv                   mmseqs convertalis output
   PREFIX_Res.with_taxonomy.tsv     final table with added taxid + lineage columns
+  PREFIX.run.log                   combined log (mmseqs + taxonkit + pipeline)
+  PREFIX.summary.txt               summary report (hits, taxonomy coverage, species count)
+
+If --keep-raw is set:
+  PREFIX_Res.tsv                   raw mmseqs convertalis output
 
 If --keep-tax is set, these are also kept:
   PREFIX.accessions
@@ -67,6 +87,10 @@ If --keep-tax is set, these are also kept:
   PREFIX.taxids
   PREFIX.taxid_lineage.tsv
   PREFIX.accver_taxid_lineage.tsv
+
+If --keep-mmseqs-db is set, these are also kept:
+  PREFIX.queryDB*                  MMseqs query DB artifacts
+  PREFIX.searchRes*                MMseqs result DB artifacts
 
 Example:
   mmseqs_sting_taxonomy.sh \
@@ -90,6 +114,8 @@ MAX_SEQS="2000"
 OUTDIR="."
 KEEP_TMP=0
 KEEP_TAX=0
+KEEP_MMSEQS_DB=0
+KEEP_RAW=0
 
 # Parse args
 if [[ $# -eq 0 ]]; then usage; exit 1; fi
@@ -109,6 +135,8 @@ while [[ $# -gt 0 ]]; do
     -o) OUTDIR="$2"; shift 2 ;;
     --keep-tmp) KEEP_TMP=1; shift 1 ;;
     --keep-tax) KEEP_TAX=1; shift 1 ;;
+    --keep-mmseqs-db) KEEP_MMSEQS_DB=1; shift 1 ;;
+    --keep-raw) KEEP_RAW=1; shift 1 ;;
     -h|--help) usage; exit 0 ;;
     *) die "Unknown option: $1 (use -h for help)" ;;
   esac
@@ -124,24 +152,44 @@ done
 : "${MAPFILE:?Missing -m PROT_ACCESSION2TAXID}"
 : "${TAXDUMP:?Missing -d TAXONKIT_TAXDUMP_DIR}"
 
-[[ -s "$QUERY_FASTA" ]] || die "Query FASTA not found or empty: $QUERY_FASTA"
-[[ -e "$MAPFILE" ]]     || die "Mapping file not found: $MAPFILE"
-[[ -d "$TAXDUMP" ]]     || die "Taxdump dir not found: $TAXDUMP"
-
-command -v mmseqs >/dev/null 2>&1 || die "mmseqs not found in PATH"
-command -v taxonkit >/dev/null 2>&1 || die "taxonkit not found in PATH"
-command -v awk >/dev/null 2>&1 || die "awk not found"
-command -v join >/dev/null 2>&1 || die "join not found"
-command -v sort >/dev/null 2>&1 || die "sort not found"
-command -v cut >/dev/null 2>&1 || die "cut not found"
-
 mkdir -p "$OUTDIR"
+
+# Logging files
+LOGFILE="${OUTDIR}/${PREFIX}.run.log"
+SUMMARY="${OUTDIR}/${PREFIX}.summary.txt"
+
+# Start logging everything (stdout+stderr) to file AND screen
+# NOTE: this must happen after OUTDIR exists
+exec > >(tee -a "$LOGFILE") 2>&1
+
+echo "============================================================"
+echo "[RUN] mmseqs_sting_taxonomy.sh"
+echo "[PREFIX] $PREFIX"
+echo "[DATE]   $(date -Is)"
+echo "============================================================"
+echo "[ARGS]  QUERY_FASTA=$QUERY_FASTA"
+echo "[ARGS]  TARGET_DB=$TARGET_DB"
+echo "[ARGS]  THREADS=$THREADS"
+echo "[ARGS]  NUM_ITER=$NUM_ITER"
+echo "[ARGS]  EVALUE=$EVALUE"
+echo "[ARGS]  SENSITIVITY=$SENSITIVITY"
+echo "[ARGS]  MAX_SEQS=$MAX_SEQS"
+echo "[ARGS]  MAPFILE=$MAPFILE"
+echo "[ARGS]  TAXDUMP=$TAXDUMP"
+echo "[ARGS]  OUTDIR=$OUTDIR"
+echo "[ARGS]  KEEP_TMP=$KEEP_TMP"
+echo "[ARGS]  KEEP_TAX=$KEEP_TAX"
+echo "[ARGS]  KEEP_MMSEQS_DB=$KEEP_MMSEQS_DB"
+echo "[ARGS]  KEEP_RAW=$KEEP_RAW"
+echo "============================================================"
+echo
 
 # Standardized names
 QUERY_DB="${OUTDIR}/${PREFIX}.queryDB"
 RES_DB="${OUTDIR}/${PREFIX}.searchRes"
 TMPDIR="${OUTDIR}/${PREFIX}.mmseqs_tmp"
 
+# Raw TSV (intermediate) and final TSV
 RES_TSV="${OUTDIR}/${PREFIX}_Res.tsv"
 RES_WITH_TAX="${OUTDIR}/${PREFIX}_Res.with_taxonomy.tsv"
 
@@ -160,99 +208,51 @@ if [[ "$MAPFILE" =~ \.gz$ ]]; then
   MAPCAT="zcat"
 fi
 
-echo "[INFO] Prefix:              $PREFIX"
-echo "[INFO] Query FASTA:          $QUERY_FASTA"
-echo "[INFO] Target MMseqs DB:      $TARGET_DB"
-echo "[INFO] Threads:              $THREADS"
-echo "[INFO] Iterations:           $NUM_ITER"
-echo "[INFO] E-value:              $EVALUE"
-echo "[INFO] Sensitivity (-s):     $SENSITIVITY"
-echo "[INFO] Max seqs:             $MAX_SEQS"
-echo "[INFO] Mapping file:         $MAPFILE"
-echo "[INFO] Taxdump dir:          $TAXDUMP"
-echo "[INFO] Output dir:           $OUTDIR"
-echo "[INFO] Keep tmp:             $KEEP_TMP"
-echo "[INFO] Keep tax intermediates:$KEEP_TAX"
-echo
-
-
 ###############################################################################
 # PRE-FLIGHT VALIDATION CHECKS
 ###############################################################################
-
 echo "------------------------------------------------------------"
 echo "[CHECKPOINT] Validating inputs and environment..."
 echo "------------------------------------------------------------"
 
 # 1) Check required executables
-for tool in mmseqs taxonkit awk sort join cut; do
-    if ! command -v "$tool" >/dev/null 2>&1; then
-        echo "[ERROR] Required executable '$tool' not found in PATH."
-        exit 1
-    fi
+for tool in mmseqs taxonkit awk sort join cut tee; do
+  command -v "$tool" >/dev/null 2>&1 || die "Required executable '$tool' not found in PATH."
 done
 echo "[OK] Required executables found."
 
 # 2) Check query FASTA
-if [[ ! -f "$QUERY_FASTA" ]]; then
-    echo "[ERROR] Query FASTA file not found: $QUERY_FASTA"
-    exit 1
-fi
-
-if [[ ! -s "$QUERY_FASTA" ]]; then
-    echo "[ERROR] Query FASTA file is empty: $QUERY_FASTA"
-    exit 1
-fi
+[[ -f "$QUERY_FASTA" ]] || die "Query FASTA file not found: $QUERY_FASTA"
+[[ -s "$QUERY_FASTA" ]] || die "Query FASTA file is empty: $QUERY_FASTA"
 echo "[OK] Query FASTA exists and is non-empty."
 
-# 3) Check target MMseqs DB
-if [[ ! -f "${TARGET_DB}.dbtype" ]]; then
-    echo "[ERROR] Target MMseqs DB not found or not formatted: $TARGET_DB"
-    echo "        Expected file: ${TARGET_DB}.dbtype"
-    exit 1
-fi
+# 3) Check target MMseqs DB (basic sanity: .dbtype file must exist)
+[[ -f "${TARGET_DB}.dbtype" ]] || die "Target MMseqs DB not found or not formatted: $TARGET_DB (missing ${TARGET_DB}.dbtype)"
 echo "[OK] Target MMseqs DB detected."
 
-# 4) Check mapping file
-if [[ ! -f "$MAPFILE" ]]; then
-    echo "[ERROR] Mapping file not found: $MAPFILE"
-    exit 1
+# 4) Check mapping file exists & readability (plain or gz)
+[[ -f "$MAPFILE" ]] || die "Mapping file not found: $MAPFILE"
+if [[ "$MAPFILE" =~ \.gz$ ]]; then
+  zcat "$MAPFILE" | head -n 1 >/dev/null 2>&1 || die "Mapping file (.gz) appears unreadable: $MAPFILE"
+else
+  head -n 1 "$MAPFILE" >/dev/null 2>&1 || die "Mapping file appears unreadable: $MAPFILE"
 fi
-echo "[OK] Mapping file exists."
+echo "[OK] Mapping file exists and is readable."
 
 # 5) Check taxdump directory structure
-if [[ ! -f "$TAXDUMP/nodes.dmp" ]] || [[ ! -f "$TAXDUMP/names.dmp" ]]; then
-    echo "[ERROR] Taxdump directory invalid: $TAXDUMP"
-    echo "        Required files: nodes.dmp and names.dmp"
-    exit 1
-fi
+[[ -f "$TAXDUMP/nodes.dmp" ]] || die "Taxdump invalid: missing $TAXDUMP/nodes.dmp"
+[[ -f "$TAXDUMP/names.dmp" ]] || die "Taxdump invalid: missing $TAXDUMP/names.dmp"
 echo "[OK] Taxdump directory validated."
 
 # 6) Validate numeric parameters
-if ! [[ "$THREADS" =~ ^[0-9]+$ ]]; then
-    echo "[ERROR] THREADS must be an integer."
-    exit 1
-fi
-
-if ! [[ "$NUM_ITER" =~ ^[0-9]+$ ]]; then
-    echo "[ERROR] NUM_ITERATIONS must be an integer."
-    exit 1
-fi
-
+[[ "$THREADS" =~ ^[0-9]+$ ]] || die "THREADS must be an integer: $THREADS"
+[[ "$NUM_ITER" =~ ^[0-9]+$ ]] || die "NUM_ITERATIONS must be an integer: $NUM_ITER"
 echo "[OK] Numeric parameters validated."
 
 echo "------------------------------------------------------------"
 echo "[CHECKPOINT PASSED] All inputs validated."
-echo "Starting MMseqs pipeline..."
 echo "------------------------------------------------------------"
 echo
-
-head -n 1 "$MAPFILE" >/dev/null 2>&1 || {
-    echo "[ERROR] Mapping file appears unreadable."
-    exit 1
-}
-
-
 
 ###############################################################################
 # 1) Prepare query database
@@ -273,7 +273,7 @@ mmseqs search "$QUERY_DB" "$TARGET_DB" "$RES_DB" "$TMPDIR" \
   --rescore-mode 0
 
 ###############################################################################
-# 3) Export results as TSV
+# 3) Export results as TSV (intermediate; deleted by default)
 ###############################################################################
 echo "[INFO] Converting alignments to TSV..."
 mmseqs convertalis "$QUERY_DB" "$TARGET_DB" "$RES_DB" "$RES_TSV" \
@@ -340,13 +340,90 @@ awk -F'\t' 'BEGIN{OFS="\t"}
 > "$RES_WITH_TAX"
 
 ###############################################################################
+# SUMMARY REPORT
+###############################################################################
+echo "[INFO] Building summary report: $SUMMARY"
+
+total_hits=$(wc -l < "$RES_WITH_TAX" | awk '{print $1}')
+tax_hits=$(awk -F'\t' '$NF!="NA"{c++} END{print c+0}' "$RES_WITH_TAX")
+unique_taxids=$(awk -F'\t' '$NF!="NA"{print $(NF-1)}' "$RES_WITH_TAX" | sort -u | wc -l | awk '{print $1}')
+unique_species=$(awk -F'\t' '$NF!="NA"{print $NF}' "$RES_WITH_TAX" | sort -u | wc -l | awk '{print $1}')
+
+{
+  echo "============================================================"
+  echo "MMseqs taxonomy run summary"
+  echo "Prefix:                $PREFIX"
+  echo "Date:                  $(date -Is)"
+  echo "Query FASTA:            $QUERY_FASTA"
+  echo "Target MMseqs DB:       $TARGET_DB"
+  echo "Threads:               $THREADS"
+  echo "Iterations:            $NUM_ITER"
+  echo "E-value:               $EVALUE"
+  echo "Sensitivity (-s):      $SENSITIVITY"
+  echo "Max seqs:              $MAX_SEQS"
+  echo "Mapping file:          $MAPFILE"
+  echo "Taxdump dir:           $TAXDUMP"
+  echo "Output directory:      $OUTDIR"
+  echo "------------------------------------------------------------"
+  echo "Total hits (rows):     $total_hits"
+  echo "Hits with taxonomy:    $tax_hits"
+  echo "Unique TaxIDs:         $unique_taxids"
+  echo "Unique species(lineage): $unique_species"
+  echo "------------------------------------------------------------"
+  echo "Final output:          $RES_WITH_TAX"
+  echo "Log file:              $LOGFILE"
+  echo "============================================================"
+} > "$SUMMARY"
+
+echo "[INFO] Summary:"
+cat "$SUMMARY"
+
+###############################################################################
 # Cleanup intermediates (taxonomy)
 ###############################################################################
 if [[ "$KEEP_TAX" -eq 0 ]]; then
   echo "[INFO] Removing intermediate taxonomy files (use --keep-tax to keep them)..."
-  rm -f "$ACCESSIONS" "$TAXID_RAW" "$ACCVER_TAXID" "$TAXIDS" "$TAXID_LINEAGE" "$ACCVER_TAXID_LINEAGE"
+  rm -f "$ACCESSIONS" "$TAXID_RAW" "$ACCVER_TAXID" "$TAXIDS" "$TAXID_LINEAGE" "$ACCVER_TAXID_LINEAGE" 2>/dev/null || true
 else
   echo "[INFO] Keeping intermediate taxonomy files (--keep-tax set)."
+fi
+
+###############################################################################
+# Cleanup raw MMseqs TSV
+###############################################################################
+if [[ "$KEEP_RAW" -eq 0 ]]; then
+  echo "[INFO] Removing raw MMseqs TSV (use --keep-raw to keep it): $RES_TSV"
+  rm -f "$RES_TSV" 2>/dev/null || true
+else
+  echo "[INFO] Keeping raw MMseqs TSV (--keep-raw set): $RES_TSV"
+fi
+
+###############################################################################
+# Cleanup MMseqs DB artifacts (query DB + search result DB)
+###############################################################################
+if [[ "$KEEP_MMSEQS_DB" -eq 0 ]]; then
+  echo "[INFO] Removing MMseqs DB artifacts (use --keep-mmseqs-db to keep them)..."
+
+  # Query DB artifacts
+  rm -f \
+    "${QUERY_DB}" \
+    "${QUERY_DB}.dbtype" \
+    "${QUERY_DB}.index" \
+    "${QUERY_DB}.lookup" \
+    "${QUERY_DB}.source" \
+    "${QUERY_DB}_h" \
+    "${QUERY_DB}_h.dbtype" \
+    "${QUERY_DB}_h.index" \
+    2>/dev/null || true
+
+  # Search results DB artifacts
+  rm -f \
+    "${RES_DB}" \
+    "${RES_DB}.dbtype" \
+    "${RES_DB}.index" \
+    2>/dev/null || true
+else
+  echo "[INFO] Keeping MMseqs DB artifacts (--keep-mmseqs-db set)."
 fi
 
 ###############################################################################
@@ -360,6 +437,7 @@ else
 fi
 
 echo
-echo "[DONE] Results:"
-echo "  - Raw mmseqs TSV:          $RES_TSV"
+echo "[DONE] Result:"
 echo "  - Final TSV with taxonomy: $RES_WITH_TAX"
+echo "  - Log file:                $LOGFILE"
+echo "  - Summary report:          $SUMMARY"
